@@ -3,6 +3,7 @@ var app         = express();
 var bodyParser  = require('body-parser');
 var morgan      = require('morgan');
 var mongoose    = require('mongoose');
+var bcrypt = require('bcrypt');
 
 var jwt    = require('jsonwebtoken'); // used to create, sign, and verify tokens
 var config = require('./config'); 
@@ -25,18 +26,21 @@ app.get('/', function(req, res) {
 });
 
 app.get('/setup', function(req, res) {
-  var suren = new User({
-    name: 'Surender',
-    password: 'password',
-    admin: true
+  bcrypt.hash('password', 5, function( err, bcryptedPassword) {
+    var user = new User({
+      name: 'admin',
+      password: bcryptedPassword,
+      admin: true
+    });
+
+    user.save(function(err) {
+      if(err) throw err;
+
+      console.log('User Saved Successfully');
+      res.json({success: true});
+    }) 
   });
-
-  suren.save(function(err) {
-    if(err) throw err;
-
-    console.log('User Saved Successfully');
-    res.json({success: true});
-  })
+  
 });
 
 // API Routes
@@ -51,19 +55,23 @@ apiRoutes.post('/authenticate', function(req, res) {
     if(!user) {
       res.json({ success: false, message: 'Authentication failed. User not found.' });
     } else if(user) {
-      if(user.password != req.body.password) {
-        res.json({ success: false, message: 'Authentication failed. Wrong password.' });
-      } else {
-        var token = jwt.sign(user, app.get('superSecret'), {
-          expiresIn : 60*60*24
-        });
+      bcrypt.compare(req.body.password, user.password, function(err, doesMatch) {
+        if (doesMatch) {
+            //log him in
+            var token = jwt.sign(user, app.get('superSecret'), {
+              expiresIn : 60*60*24
+            });
 
-        res.json({
-          success: true,
-          message: 'Enjoy your token!',
-          token: token
-        })
-      }
+            res.json({
+              success: true,
+              message: 'Enjoy your token!',
+              token: token
+            })
+        } else{
+           //go away
+           res.json({ success: false, message: 'Authentication failed. Wrong password.' });
+        }
+      });
     }
   })
 });
@@ -95,13 +103,79 @@ apiRoutes.get('/', function(req, res) {
   res.json({messaeg: 'Welcome to cool API'});
 });
 
-apiRoutes.get('/users', function(req, res) {
-  User.find({}, function(err, users) {
-    if(err) throw err;
+// /api/users/
 
-    res.json(users);
+apiRoutes.route('/users')
+  
+  // Get users list
+  .get(function(req, res) {
+    User.find({}, function(err, users) {
+      if(err) throw err;
+
+      res.json(users);
+    })
   })
-});
+
+  // Creat a new user
+  .post(function(req, res) {
+    bcrypt.hash(req.body.password, 5, function( err, bcryptedPassword) {
+      var user = new User({
+        name: req.body.name,
+        password: bcryptedPassword,
+        admin: req.body.admin || true
+      });
+
+      user.save(function(err) {
+        if(err) {
+          res.send(err)
+        }
+
+        res.json({message: 'User Saved Successfully'});
+      });
+    })
+  });
+
+// /users/:user_id
+
+apiRoutes.route('/users/:user_id')
+
+  // Get the user with that Id 
+  .get(function(req, res) {
+    User.findOne({_id: req.params.user_id}, function(err, user) {
+      if(err) throw err
+
+      res.send(user);
+    })
+  })
+
+  // Update the user with that Id
+  .put(function(req, res) {
+    User.findOne({_id: req.params.user_id}, function(err, user) {
+      if(err) throw err;
+      
+      user.name = req.body.name;
+
+      user.save(function(error) {
+        if (error) {
+          res.send({message: 'No Info has been given for udpates'});
+        }
+
+        res.send({message: 'User Info updated Successfully'});
+      })
+
+    })
+  })
+
+  // Delete the user with that Id
+  .delete(function(req, res) {
+    User.remove({_id: req.params.user_id}, function(err, user) {
+      if(err) {
+        res.send(err);
+      }
+
+      res.json({message: "User Successfully Deleted"});
+    })
+  });
 
 app.use('/api', apiRoutes);
 
